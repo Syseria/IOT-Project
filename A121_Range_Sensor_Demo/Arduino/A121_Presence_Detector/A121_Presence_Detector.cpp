@@ -204,7 +204,12 @@ void A121_Get_Application_Id(uint32_t *value)
 
 void A121_init()
 {
-  Serial.begin(115200);
+  Serial.begin(9600);
+  while (!Serial);
+
+  Serial.println("test");
+
+  return;
 
   pinMode(A121_WAKEUP_PIN, OUTPUT);
   pinMode(A121_BUSY_PIN, INPUT);
@@ -214,8 +219,12 @@ void A121_init()
   Wire.setClock(400000);
   Wire.begin();
 
+  Serial.println("BUSY");
+
   uint32_t value;
   while (digitalRead(A121_BUSY_PIN) == 0);
+
+  Serial.println("READY");
 
   A121_Get_Application_Id(&value);
   Serial.print("A121_Get_Application_Id: 0x");
