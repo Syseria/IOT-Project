@@ -25,7 +25,25 @@ class NetworkMock:
         # Convert to bytes
         payload_bytes = int(bit_string, 2).to_bytes(19, byteorder='big')
 
+        # Build the JSON object exactly how TTN's MQTT integration outputs it
+        ttn_mock_payload = {
+            "uplink_message": {
+                "frm_payload": payload_bytes.hex(),
+                "decoded_payload": {
+                    # Summarize the row data for Grafana
+                    "row_A_free": sum(1 for s in spots if s.row_name == "Row A" and not s.occupied),
+                    "row_B_free": sum(1 for s in spots if s.row_name == "Row B" and not s.occupied),
+                    "row_C_free": sum(1 for s in spots if s.row_name == "Row C" and not s.occupied),
+                    "row_D_free": sum(1 for s in spots if s.row_name == "Row D" and not s.occupied),
+                    "row_E_free": sum(1 for s in spots if s.row_name == "Row E" and not s.occupied),
+                    "row_F_free": sum(1 for s in spots if s.row_name == "Row F" and not s.occupied),
+                    "total_free": sum(1 for s in spots if not s.occupied),
+                    "avg_battery_pct": sum(s.battery.get_percentage() for s in spots) / len(spots)
+                }
+            }
+        }
+
         if self.connected:
-            self.client.publish(self.topic, payload_bytes)
+            self.client.publish(self.topic, json.dumps(ttn_mock_payload))
 
         return payload_bytes.hex()
