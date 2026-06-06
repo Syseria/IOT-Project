@@ -1,8 +1,8 @@
 import paho.mqtt.client as mqtt
-
+import json
 
 class NetworkMock:
-    def __init__(self, broker_address="127.0.0.1", port=1883, topic="v1/parking/devices/master/up"):
+    def __init__(self, broker_address="127.0.0.1", port=1883, topic="v3/parking/devices/master/up"):
         self.topic = topic
         self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
         try:
