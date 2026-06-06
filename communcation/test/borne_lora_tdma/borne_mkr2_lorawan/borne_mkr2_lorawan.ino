@@ -109,9 +109,9 @@ void buildDeltaPayload() {
 
     if (firstSend || diff != 0) {
       compressed[compressedSize++] = i;
-      compressed[compressedSize++] = diff;
+      compressed[compressedSize++] = current;
     }
-
+ 
     lastBuffer[i] = current;
   }
 
@@ -123,7 +123,7 @@ void buildDeltaPayload() {
 // ================================================================
 void sendLoRaBitmap() {
 
-  if (millis() - lastSend < SEND_INTERVAL) return;
+  if (!firstSend && millis() - lastSend < SEND_INTERVAL) return;
 
   buildDeltaPayload();
 

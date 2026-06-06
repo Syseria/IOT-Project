@@ -55,7 +55,11 @@ void envoyerRegister() {
 // DATA
 void envoyerData() {
 
-  bool occupe = placeOccupee();
+  //bool occupe = placeOccupee();
+
+  // to simulate a state changes - REMOVE
+  static bool occupe = false;
+  occupe = !occupe;
 
   LoRa.beginPacket();
   LoRa.write(DATA);
@@ -134,6 +138,10 @@ void loop() {
     envoyerRegister();
   }
 
+  // ---------------------------------------------------------------------------------------
+  // COMMENTED FOR TESTING
+  // ---------------------------------------------------------------------------------------
+  /*
   // ── connecté → envoi DATA sur changement d’état
   static bool dernierEtat = false;
   bool etat = placeOccupee();
@@ -142,6 +150,20 @@ void loop() {
     envoyerData();
     dernierEtat = etat;
   }
+  */
+  // ---------------------------------------------------------------------------------------
+
+  // ---------------------------------------------------------------------------------------
+  // TESTING REPLACEMENT - REMOVE !!!!
+  // ---------------------------------------------------------------------------------------
+  static uint32_t chronoTest = 0;
+  const uint32_t INTERVALL_TEST = 10000;
+
+  if (connecte && !enAttenteACK && (millis() - chronoTest >= INTERVALL_TEST)) {
+    envoyerData();
+    chronoTest = millis();
+  }
+  // ---------------------------------------------------------------------------------------
 
   // ── retry DATA si pas ACK
   if (enAttenteACK && millis() - dernierEnvoi > timeoutACK) {

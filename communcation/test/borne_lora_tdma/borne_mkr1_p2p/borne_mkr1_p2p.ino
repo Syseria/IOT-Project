@@ -9,6 +9,8 @@
 #define ACK_DATA  0x05
 #define ACK_REG   0x03
 
+bool firstSend = true;
+
 // ───────────────────────────────────────────────
 // 🔥 PASSAGE À 150 CAPTEURS
 // ───────────────────────────────────────────────
@@ -223,7 +225,8 @@ void loop() {
 
   static uint32_t last = 0;
 
-  if (millis() - last > 2000) {
+  if (firstSend || millis() - last > 2000) {
+    firstSend = false;
     envoyerUARTBitmap();
     last = millis();
   }
