@@ -1,12 +1,20 @@
-// ================================================================
-//  CAPTEUR — LoRa P2P (ACK + REGISTER + RETRY ROBUSTE)
-// ================================================================
+#if defined(ARDUINO_SEEED_XIAO_NRF52840_SENSE) || defined(ARDUINO_SEEED_XIAO_NRF52840)
+#error "XIAO nRF52840 please use the non-mbed-enable version."
+#endif
 
+#include <mmwave_for_xiao.h>
 #include <LoRa.h>
 
-#define CAPTEUR_PIN  1
-#define MON_ID  0x00000001
+// Use the MKR WAN 1310 hardware UART
+#define COMSerial Serial1
+#define ShowSerial Serial
 
+Seeed_HSP24 xiao_config(COMSerial, ShowSerial);
+
+// ================================================================
+//  CAPTEUR CONFIGURATION
+// ================================================================
+#define MON_ID  0x00000001
 #define FREQUENCE 868E6
 #define SPREADING 7
 #define PUISSANCE 14
@@ -17,28 +25,45 @@
 #define ACK_DATA  0x05
 #define ACK_REG   0x03
 
-// ───────────────────────────────────────────────
+// Variables Réseau
 bool enAttenteACK = false;
 uint8_t seq = 0;
 uint8_t nbRetry = 0;
-
 uint32_t dernierEnvoi = 0;
 uint32_t timeoutACK = 1500;
-
-// état réseau
 bool connecte = false;
 uint8_t nodeID = 0xFF;
 
 // ───────────────────────────────────────────────
+// GESTION DU RADAR (FIXED)
+// ───────────────────────────────────────────────
+// We store the last known state. It only changes when we get a VALID new frame.
+bool etatCourantOccupe = false; 
+
 bool placeOccupee() {
-  //return digitalRead(CAPTEUR_PIN) == HIGH;
-  return true;
+  // Read the radar buffer without blocking
+  Seeed_HSP24::RadarStatus radarStatus = xiao_config.getStatus();
+
+  // Only update our logic if we caught a valid frame
+  if (radarStatus.distance != -1) {
+    // ShowSerial.println("Distance: " + String(radarStatus.distance));
+    
+    // Threshold check (50cm)
+    if(radarStatus.distance >= 50){
+      etatCourantOccupe = false;
+    } else {
+      etatCourantOccupe = true;
+    }
+  }
+
+  return etatCourantOccupe; 
 }
+
 
 // ───────────────────────────────────────────────
 // REGISTER (rejoin réseau)
+// ───────────────────────────────────────────────
 void envoyerRegister() {
-
   LoRa.beginPacket();
   LoRa.write(REGISTER);
   LoRa.write((MON_ID >> 24) & 0xFF);
@@ -47,19 +72,15 @@ void envoyerRegister() {
   LoRa.write(MON_ID & 0xFF);
   LoRa.endPacket();
 
-  Serial.println("[CAPTEUR] REGISTER envoyé");
+  ShowSerial.println("[CAPTEUR] REGISTER envoyé");
   dernierEnvoi = millis();
 }
 
 // ───────────────────────────────────────────────
 // DATA
+// ───────────────────────────────────────────────
 void envoyerData() {
-
-  //bool occupe = placeOccupee();
-
-  // to simulate a state changes - REMOVE
-  static bool occupe = false;
-  occupe = !occupe;
+  bool occupe = placeOccupee();
 
   LoRa.beginPacket();
   LoRa.write(DATA);
@@ -71,113 +92,98 @@ void envoyerData() {
   enAttenteACK = true;
   dernierEnvoi = millis();
 
-  Serial.print("[CAPTEUR] DATA envoyé — ");
-  Serial.println(occupe ? "OCCUPÉE" : "LIBRE");
+  ShowSerial.print("[CAPTEUR] DATA envoyé — ");
+  ShowSerial.println(occupe ? "OCCUPÉE" : "LIBRE");
 }
 
 // ───────────────────────────────────────────────
 // RX
+// ───────────────────────────────────────────────
 void traiterPaquet(int taille) {
-
   if (taille < 1) return;
 
   uint8_t type = LoRa.read();
 
   // ACK REGISTER
   if (type == ACK_REG && taille >= 2) {
-
     nodeID = LoRa.read();
     connecte = true;
     nbRetry = 0;
-
-    Serial.print("[CAPTEUR] CONNECTÉ node=");
-    Serial.println(nodeID);
+    ShowSerial.print("[CAPTEUR] CONNECTÉ node=");
+    ShowSerial.println(nodeID);
   }
-
   // ACK DATA
   else if (type == ACK_DATA && taille >= 2) {
-
     uint8_t id = LoRa.read();
-
     if (id == nodeID) {
       enAttenteACK = false;
       nbRetry = 0;
-      Serial.println("[CAPTEUR] ACK DATA reçu");
+      ShowSerial.println("[CAPTEUR] ACK DATA reçu");
     }
   }
 }
 
 // ───────────────────────────────────────────────
+// SETUP
+// ───────────────────────────────────────────────
 void setup() {
-
-  Serial.begin(115200);
-  pinMode(CAPTEUR_PIN, INPUT);
+  delay(5000); // Buffer to prevent brownouts
+  
+  ShowSerial.begin(115200);
+  COMSerial.begin(256000);
+  
+  // Wait for serial monitor for debugging, but timeout after 3 seconds 
+  // so the board can run on battery without a PC attached!
+  // This is due to the sensor pulling too much mA at startup
+  uint32_t t = millis();
+  while(!ShowSerial && millis() - t < 3000);  
 
   if (!LoRa.begin(FREQUENCE)) {
-    Serial.println("LoRa KO");
+    ShowSerial.println("LoRa KO");
     while (true);
   }
 
   LoRa.setSpreadingFactor(SPREADING);
   LoRa.setTxPower(PUISSANCE);
 
-  Serial.println("CAPTEUR READY");
-
-  // 🔥 IMPORTANT : reconnect direct
   envoyerRegister();
+  ShowSerial.println("Programme Starting!");
 }
 
 // ───────────────────────────────────────────────
+// LOOP
+// ───────────────────────────────────────────────
 void loop() {
-
+  // 1. Process any incoming LoRa packets instantly
   int taille = LoRa.parsePacket();
   if (taille > 0) traiterPaquet(taille);
 
-  // ── pas connecté → retry REGISTER
+  // 2. Retry REGISTER if not connected
   if (!connecte && millis() - dernierEnvoi > 3000) {
     envoyerRegister();
   }
 
-  // ---------------------------------------------------------------------------------------
-  // COMMENTED FOR TESTING
-  // ---------------------------------------------------------------------------------------
-  /*
-  // ── connecté → envoi DATA sur changement d’état
+  // 3. Send DATA only if state changed
   static bool dernierEtat = false;
-  bool etat = placeOccupee();
+  bool etat = placeOccupee(); // This now safely returns the latched state
 
   if (connecte && !enAttenteACK && etat != dernierEtat) {
     envoyerData();
     dernierEtat = etat;
   }
-  */
-  // ---------------------------------------------------------------------------------------
 
-  // ---------------------------------------------------------------------------------------
-  // TESTING REPLACEMENT - REMOVE !!!!
-  // ---------------------------------------------------------------------------------------
-  static uint32_t chronoTest = 0;
-  const uint32_t INTERVALL_TEST = 10000;
-
-  if (connecte && !enAttenteACK && (millis() - chronoTest >= INTERVALL_TEST)) {
-    envoyerData();
-    chronoTest = millis();
-  }
-  // ---------------------------------------------------------------------------------------
-
-  // ── retry DATA si pas ACK
+  // 4. Retry DATA if ACK timed out
   if (enAttenteACK && millis() - dernierEnvoi > timeoutACK) {
-
     if (nbRetry >= 5) {
-      Serial.println("[CAPTEUR] perte connexion → reset");
+      ShowSerial.println("[CAPTEUR] perte connexion → reset");
       connecte = false;
       enAttenteACK = false;
       nbRetry = 0;
       envoyerRegister();
     } else {
       nbRetry++;
-      Serial.print("[CAPTEUR] RETRY DATA #");
-      Serial.println(nbRetry);
+      ShowSerial.print("[CAPTEUR] RETRY DATA #");
+      ShowSerial.println(nbRetry);
       envoyerData();
     }
   }

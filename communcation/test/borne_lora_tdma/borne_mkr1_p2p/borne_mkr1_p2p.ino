@@ -71,6 +71,7 @@ int ajouterCapteur(uint32_t id) {
 // ACK REG
 // ───────────────────────────────────────────────
 void envoyerAckReg(uint8_t nodeID) {
+  delay(50);
 
   LoRa.beginPacket();
   LoRa.write(ACK_REG);
@@ -85,6 +86,7 @@ void envoyerAckReg(uint8_t nodeID) {
 // ACK DATA
 // ───────────────────────────────────────────────
 void envoyerAckData(uint8_t nodeID) {
+  delay(50);
 
   LoRa.beginPacket();
   LoRa.write(ACK_DATA);
@@ -181,7 +183,13 @@ void traiterPaquet(int taille) {
 
     if (nodeID >= MAX_CAPTEURS) return;
 
-    if (seq == lastSeq[nodeID]) return;
+    if (seq == lastSeq[nodeID]) {
+      Serial.print("[BORNE] Doublon ignoré, renvoi ACK pour node=");
+      Serial.println(nodeID);
+      envoyerAckData(nodeID);
+      return; 
+    }
+
     lastSeq[nodeID] = seq;
 
     etats[nodeID] = occupe;
