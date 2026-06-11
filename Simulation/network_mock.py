@@ -1,6 +1,9 @@
 import paho.mqtt.client as mqtt
 import os
 import json
+from dotenv import load_dotenv
+
+load_dotenv()
 
 MQTT_TOPIC = os.environ.get("MQTT_TOPIC", "v3/+/devices/+/up")
 
