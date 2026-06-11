@@ -1,10 +1,21 @@
 import paho.mqtt.client as mqtt
+import os
+import json
+from dotenv import load_dotenv
 
+load_dotenv()
+
+MQTT_TOPIC = os.environ.get("MQTT_TOPIC", "v3/+/devices/+/up")
 
 class NetworkMock:
-    def __init__(self, broker_address="127.0.0.1", port=1883, topic="v1/parking/devices/master/up"):
+    def __init__(self, broker_address="127.0.0.1", port=1883, topic=MQTT_TOPIC):
         self.topic = topic
         self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+
+        # Memory buffer to simulate Arduino's delta compression
+        self.last_buffer = bytearray(19)
+        self.first_send = True
+
         try:
             self.client.connect(broker_address, port, 60)
             self.client.loop_start()
@@ -23,27 +34,41 @@ class NetworkMock:
         bit_string = bit_string.ljust(152, '0')
 
         # Convert to bytes
-        payload_bytes = int(bit_string, 2).to_bytes(19, byteorder='big')
+        current_buffer = bytearray(int(bit_string, 2).to_bytes(19, byteorder='big'))
 
         # Build the JSON object exactly how TTN's MQTT integration outputs it
+        byte_changes = []
+        for i in range(19):
+            # If it's the first send, or the byte has changed since last time
+            if self.first_send or current_buffer[i] != self.last_buffer[i]:
+                byte_changes.append({
+                    "index": i,
+                    "value": current_buffer[i],
+                    "hex_diff": f"0x{current_buffer[i]:02X}"
+                })
+
+            # Update memory
+            self.last_buffer[i] = current_buffer[i]
+
+        self.first_send = False
+
+        # If nothing changed, don't send anything (matching LoRa behaviour)
+        if not byte_changes:
+            return None
+
+        # 5. Build the payload exactly as the TTN Javascript Decoder outputs it
         ttn_mock_payload = {
             "uplink_message": {
-                "frm_payload": payload_bytes.hex(),
                 "decoded_payload": {
-                    # Summarize the row data for Grafana
-                    "row_A_free": sum(1 for s in spots if s.row_name == "Row A" and not s.occupied),
-                    "row_B_free": sum(1 for s in spots if s.row_name == "Row B" and not s.occupied),
-                    "row_C_free": sum(1 for s in spots if s.row_name == "Row C" and not s.occupied),
-                    "row_D_free": sum(1 for s in spots if s.row_name == "Row D" and not s.occupied),
-                    "row_E_free": sum(1 for s in spots if s.row_name == "Row E" and not s.occupied),
-                    "row_F_free": sum(1 for s in spots if s.row_name == "Row F" and not s.occupied),
-                    "total_free": sum(1 for s in spots if not s.occupied),
-                    "avg_battery_pct": sum(s.battery.get_percentage() for s in spots) / len(spots)
+                    "compression_type": "DELTA_COMPRESSED",
+                    "is_full_sync": len(byte_changes) == 19,
+                    "byte_changes": byte_changes
                 }
             }
         }
 
         if self.connected:
             self.client.publish(self.topic, json.dumps(ttn_mock_payload))
+            print(f"[SIM] Published {len(byte_changes)} byte changes.")
 
-        return payload_bytes.hex()
+        return ttn_mock_payload
